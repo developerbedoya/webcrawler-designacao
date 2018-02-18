@@ -1,0 +1,33 @@
+{
+  "name": "webcrawler-designacao",
+  "version": "0.0.1",
+  "description": "Web Crawler para obter as designações para professores do Estado de Minas Gerais",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/developerbedoya/webcrawler-designacao.git"
+  },
+  "keywords": [
+    "designação",
+    "professores",
+    "see",
+    "mg",
+    "minas",
+    "gerais"
+  ],
+  "author": "Developer Bedoya",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/developerbedoya/webcrawler-designacao/issues"
+  },
+  "homepage": "https://github.com/developerbedoya/webcrawler-designacao#readme",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.2",
+    "iconv": "^2.3.0",
+    "request": "^2.83.0",
+    "request-debug": "^0.2.0"
+  }
+}
