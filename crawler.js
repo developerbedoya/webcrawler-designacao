@@ -1,3 +1,4 @@
+#!/usr/bin/env nodejs
 'use strict';
 
 const url = 'http://controlequadropessoal.educacao.mg.gov.br/divulgacao';
@@ -32,6 +33,23 @@ const nodemailer = require('nodemailer');
 const sqlite3 = require('sqlite3');
 
 const db = new sqlite3.Database(baseDados);
+
+const log = (message) => {
+    const formatDateTime = (date) => {
+        let a = new Date();
+        let y = a.getFullYear();
+        let m = ('' + (a.getMonth() + 1)).padStart(2, '0');
+        let d = ('' + a.getDate()).padStart(2, '0');
+        let hh = ('' + a.getHours()).padStart(2, '0');
+        let mm = ('' + a.getMinutes()).padStart(2, '0');
+        let ss = ('' + a.getSeconds()).padStart(2, '0'); 
+        
+        return `${y}-${m}-${d} ${hh}:${mm}:${ss}`;
+    }
+    
+    const dateTime = formatDateTime(new Date());
+    console.log(`${dateTime}: ${message}`);
+}
 
 const convertISO88591ToUTF8 = (buffer) => {
     let iconv = new Iconv('ISO-8859-1', 'UTF-8');
@@ -257,21 +275,21 @@ const downloadHtml = (url) => {
 };
 
 const addDesignacoesToDBByFiltersAndUsuario = (idUsuario, regional, municipio, cargo, categoria) => {
-    urls = [];
-    
-    getDesignacoesByFiltersRec(regional, municipio, cargo, categoria, 1).then((newUrlList) => {
-        const regexIdEdital = /[0-9]+/;
+    return new Promise((resolve, reject) => {
+        urls = [];
         
-        // Excluir urls já baixadas
-        getUrlsFromDB().then((oldUrls) => {
-            let urlList = newUrlList;//.filter(el => oldUrls.indexOf(el) < 0);
+        getDesignacoesByFiltersRec(regional, municipio, cargo, categoria, 1).then((newUrlList) => {
+            const regexIdEdital = /[0-9]+/;
             
-            let urlPromises = urlList.map((url) => {
-                return downloadHtml(url).then((html) => {
-                    
-                    let $ = cheerio.load(html);
-                    
-                    let conteudo = 
+            getUrlsFromDB().then((oldUrls) => {
+                let urlList = newUrlList;//.filter(el => oldUrls.indexOf(el) < 0);
+                
+                let urlPromises = urlList.map((url) => {
+                    return downloadHtml(url).then((html) => {
+                        
+                        let $ = cheerio.load(html);
+                        
+                        let conteudo = 
 `<!DOCTYPE html>
 	<html lang="pt-br" dir="ltr">
 		<head>
@@ -302,24 +320,32 @@ const addDesignacoesToDBByFiltersAndUsuario = (idUsuario, regional, municipio, c
 </html>`;
 
                     
-                    return {
-                        id: regexIdEdital.exec(url)[0],
-                        url: url,
-                        html: conteudo
-                    };
+                        return {
+                            id: regexIdEdital.exec(url)[0],
+                            url: url,
+                            html: conteudo
+                        };
+                    });
+                });
+                
+                Promise.all(urlPromises).then((items) => {
+                    items.forEach((i) => {
+                        // Excluir urls já baixadas
+                        if (oldUrls.indexOf(i.url) < 0) {
+                            log(`nova designação encontrada, id: ${i.id}, url: ${i.url}`);
+                            addDesignacaoToDB(i.id, i.url, i.html);
+                        }
+                        addNewEnvioToDB(idUsuario, i.id);
+                    });
+                    
+                    resolve();
                 });
             });
-            
-            Promise.all(urlPromises).then((items) => {
-                items.forEach((i) => {
-                    if (oldUrls.indexOf(i.url) < 0) {
-                        addDesignacaoToDB(i.id, i.url, i.html);
-                    }
-                    addNewEnvioToDB(idUsuario, i.id);
-                });
-            });
+        }, err => {
+            log(`addDesignacoesToDBByFiltersAndUsuario: ${err}`)
+            resolve();
         });
-    }, err => console.log('addDesignacoesToDBByFiltersAndUsuario:', err));
+    });
 };
 
 const sendEmail = (to, subject, html) => {
@@ -347,30 +373,48 @@ const sendEmail = (to, subject, html) => {
             
             transporter.sendMail(mailOptions, (error, info) => {
                 if (error) {
-                    return console.log('sendEmail:', error);
+                    return log(`sendEmail: ${error}`);
                 }
                 
-                console.log(`Mensagem '${subject} enviada para ${to}`);
+                log(`Mensagem '${subject} enviada para ${to}`);
             });
         });
     
     //db.close();
 }
-getAllDesignacoesNotSent().then((designacoes) => {
-    designacoes.forEach((d) => {
-        let subject = `Designação #${d.id}`;
-        sendEmail(d.email, subject, d.conteudo);
-        markDesignacaoAsSent(d.idUsuario, d.id);
-    }, (err) => console.log('getAllDesignacoesNotSent:', err));
-});
 
-getUsuariosFromDB().then(listUsuarios => {
-    listUsuarios.forEach((usuario) => {
-        getFiltrosByUsuarioFromDB(usuario.id).then((filtros => {
-            filtros.forEach((f) => 
-                addDesignacoesToDBByFiltersAndUsuario(
-                        usuario.id, f.regional, f.municipio, 
-                        f.cargo, f.categoria));
-        }));
+const main = () => {
+    log('procurando designações para adicionar à base de dados...')
+    getUsuariosFromDB().then(listUsuarios => {
+        return new Promise((resolve, reject) => {
+            if (listUsuarios.length == 0) {
+                resolve();
+            }
+            
+            listUsuarios.forEach((usuario) => {
+                log(`Usuário atual: ${usuario.email}`);
+                getFiltrosByUsuarioFromDB(usuario.id).then((filtros => {
+                    let promisesBusca = filtros.map((f) => {
+                        log(`procurando designações para o usuário ${usuario.email} com filtro de regional '${f.regional}', município '${f.municipio}', cargo '${f.cargo}', categoria '${f.categoria}'`)
+                        return addDesignacoesToDBByFiltersAndUsuario(
+                                usuario.id, f.regional, f.municipio, 
+                                f.cargo, f.categoria);
+                    });
+                    Promise.all(promisesBusca).then(() => resolve());
+                }));
+            });
+        });
+    }).then(() => {
+        log('buscando designações na base de dados, ainda não enviadas por e-mail...');
+        getAllDesignacoesNotSent().then((designacoes) => {
+            log(`foram encontradas ${designacoes.length} designações ainda não enviadas por e-mail`);
+            designacoes.forEach((d) => {
+                let subject = `Designação #${d.id}`;
+                sendEmail(d.email, subject, d.conteudo);
+                markDesignacaoAsSent(d.idUsuario, d.id);
+            }, (err) => log(`getAllDesignacoesNotSent: ${err}`));
+        })
     });
-});
+}
+
+main();
