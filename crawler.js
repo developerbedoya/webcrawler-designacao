@@ -110,7 +110,6 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
 
 const getUrlsFromDB = () => {
     return new Promise((resolve, reject) => {
-        //const db = new sqlite3.Database(baseDados);
         db.all('SELECT url FROM designacao', (err, rows) => {
             if (err) {
                 reject(err);
@@ -118,14 +117,11 @@ const getUrlsFromDB = () => {
             let urls = rows.map((r) => r.url);
             resolve(urls);
         });
-        
-        //db.close();
     });
 }
 
 const getUsuariosFromDB = () => {
     return new Promise((resolve, reject) => {
-        //const db = new sqlite3.Database(baseDados);
         db.all('SELECT id, email FROM usuario', (err, rows) => {
             if (err) {
                 reject(err);
@@ -133,14 +129,11 @@ const getUsuariosFromDB = () => {
             
             resolve(rows);
         });
-        
-        //db.close();
     });
 }
 
 const getFiltrosByUsuarioFromDB = (idUsuario) => {
     return new Promise((resolve, reject) => {
-        //const db = new sqlite3.Database(baseDados);
         const sql = 
 `SELECT regional, municipio, cargo, categoria FROM filtro
 WHERE idUsuario = ${idUsuario}`;
@@ -151,22 +144,13 @@ WHERE idUsuario = ${idUsuario}`;
             
             resolve(rows);
         });
-        
-        //db.close();
     });
 }
 
 const addDesignacaoToDB = (id, url, conteudo) => {
-    //const db = new sqlite3.Database(baseDados);
     const sql = 'INSERT INTO designacao (id, url, conteudo) VALUES (?, ?, ?)';
     
-    db.serialize(() => {
-        const stmt = db.prepare(sql);
-        
-        stmt.run(id, url, conteudo);
-        stmt.finalize();
-    });
-    //db.close();
+    db.run(sql, [id, url, conteudo]);
 }
 
 const addNewEnvioToDB = (idUsuario, idDesignacao) => {
@@ -174,30 +158,21 @@ const addNewEnvioToDB = (idUsuario, idDesignacao) => {
 `SELECT COUNT(*) AS numEnvios
 FROM envio
 WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
-    db.serialize(() => {
-        db.all(sql, (err, rows) => {
-            if (rows && rows.length > 0) {
-                if (rows[0].numEnvios == 0) {
-                    const sqlInsert = 'INSERT INTO envio (idUsuario, idDesignacao) VALUES (?, ?)';
-                    db.serialize(() => {
-                        const stmt = db.prepare(sqlInsert);
-                        
-                        stmt.run(idUsuario, idDesignacao);
-                        stmt.finalize();
-                    });
-                }
+    db.all(sql, (err, rows) => {
+        if (rows && rows.length > 0) {
+            if (rows[0].numEnvios == 0) {
+                const sqlInsert = 'INSERT INTO envio (idUsuario, idDesignacao) VALUES (?, ?)';
+                db.run(sqlInsert, [ idUsuario, idDesignacao ]);
             }
-        })
-    });
-    
-    //db.close();
+        }
+    })
 }
 
 const markDesignacaoAsSent = (idUsuario, idDesignacao) => {
     return new Promise((resolve, reject) => {
         const sql = `UPDATE envio SET enviado = 1 WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
         db.run(sql, () => {
-            //log(`marcando designação ${idDesignacao} como enviada para o usuário com id ${idUsuario}`);
+            log(`marcando designação ${idDesignacao} como enviada para o usuário com id ${idUsuario}`);
             resolve();
         });
     });
@@ -205,7 +180,6 @@ const markDesignacaoAsSent = (idUsuario, idDesignacao) => {
 
 const getAllDesignacoesNotSent = () => {
     return new Promise((resolve, reject) => {
-        //const db = new sqlite3.Database(baseDados);
         const sql = 
 `SELECT 
 	envio.idUsuario AS idUsuario, 
@@ -224,8 +198,6 @@ WHERE envio.enviado = 0`;
             
             resolve(rows);
         });
-        
-        //db.close();
     });
 }
 
@@ -275,7 +247,7 @@ const addDesignacoesToDBByFiltersAndUsuario = (idUsuario, regional, municipio, c
             const regexIdEdital = /[0-9]+/;
             
             getUrlsFromDB().then((oldUrls) => {
-                let urlList = newUrlList;//.filter(el => oldUrls.indexOf(el) < 0);
+                let urlList = newUrlList;
                 
                 let urlPromises = urlList.map((url) => {
                     return downloadHtml(url).then((html) => {
@@ -333,6 +305,9 @@ const addDesignacoesToDBByFiltersAndUsuario = (idUsuario, regional, municipio, c
                     
                     resolve();
                 });
+            }, err => {
+                log(`addDesignacoesToDBByFiltersAndUsuario: ${err}`)
+                resolve();
             });
         }, err => {
             log(`addDesignacoesToDBByFiltersAndUsuario: ${err}`)
@@ -383,7 +358,7 @@ const sendEmail = (to, subject, html) => {
 
 const registerExitHandlers = () => {
     process.on('exit', (code) => { db.close(); log(`---- finalizando com código ${code}`); });
-    process.on ('SIGINT', () => { db.close(); log(`---- programa interrompido com CTRL-C`); });
+    process.on ('SIGINT', () => { db.close(); log(`---- programa interrompido com CTRL-C`); process.exit(0); });
     process.on ('uncaughtException', (err) => { log(`Exceção não tratada: ${err}`); process.exit(1); });
 }
 
