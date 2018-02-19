@@ -2,7 +2,7 @@
 'use strict';
 
 const url = 'http://controlequadropessoal.educacao.mg.gov.br/divulgacao';
-const baseDados = 'designacao.db3';
+const baseDados = 'crawler.db3';
 let tokenKey = '';
 let tokenFields = '';
 
@@ -23,9 +23,6 @@ request = request.defaults({
     headers: browserHeaders,
     jar: cookies
 });
-
-//require('request-debug')(request);
-
 
 const cheerio = require('cheerio');
 const Iconv = require('iconv').Iconv;
@@ -173,17 +170,15 @@ const addDesignacaoToDB = (id, url, conteudo) => {
 }
 
 const addNewEnvioToDB = (idUsuario, idDesignacao) => {
-    //const db = new sqlite3.Database(baseDados);
     const sql = 
 `SELECT COUNT(*) AS numEnvios
 FROM envio
 WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
-
+    db.serialize(() => {
         db.all(sql, (err, rows) => {
             if (rows && rows.length > 0) {
                 if (rows[0].numEnvios == 0) {
                     const sqlInsert = 'INSERT INTO envio (idUsuario, idDesignacao) VALUES (?, ?)';
-    
                     db.serialize(() => {
                         const stmt = db.prepare(sqlInsert);
                         
@@ -192,22 +187,20 @@ WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
                     });
                 }
             }
-        });
+        })
+    });
     
     //db.close();
 }
 
 const markDesignacaoAsSent = (idUsuario, idDesignacao) => {
-    //const db = new sqlite3.Database(baseDados);
-    const sql = 'UPDATE envio SET enviado = 1 WHERE idUsuario = ? AND idDesignacao = ?';
-    
-    db.serialize(() => {
-        const stmt = db.prepare(sql);
-        
-        stmt.run(idUsuario, idDesignacao);
-        stmt.finalize();
+    return new Promise((resolve, reject) => {
+        const sql = `UPDATE envio SET enviado = 1 WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
+        db.run(sql, () => {
+            //log(`marcando designação ${idDesignacao} como enviada para o usuário com id ${idUsuario}`);
+            resolve();
+        });
     });
-    //db.close();
 }
 
 const getAllDesignacoesNotSent = () => {
@@ -349,10 +342,14 @@ const addDesignacoesToDBByFiltersAndUsuario = (idUsuario, regional, municipio, c
 };
 
 const sendEmail = (to, subject, html) => {
-    //const db = new sqlite3.Database(baseDados);
-    db.all(
-        'SELECT nome, tipoServico, email, login, senha FROM configEmail',
+    return new Promise((resolve, reject) => {
+        db.all(
+            'SELECT nome, tipoServico, email, login, senha FROM configEmail',
         (err, rows) => {
+            if (err) {
+                log(`sendMail: ${err}`);
+            }
+            
             const configEmail = rows[0];
                 
             let from = `${configEmail.nome} <${configEmail.email}>`;
@@ -373,17 +370,26 @@ const sendEmail = (to, subject, html) => {
             
             transporter.sendMail(mailOptions, (error, info) => {
                 if (error) {
-                    return log(`sendEmail: ${error}`);
+                    log(`sendEmail: ${error}`);
+                    resolve();
                 }
                 
                 log(`Mensagem '${subject} enviada para ${to}`);
+                resolve();
             });
         });
-    
-    //db.close();
+    });
+}
+
+const registerExitHandlers = () => {
+    process.on('exit', (code) => { db.close(); log(`---- finalizando com código ${code}`); });
+    process.on ('SIGINT', () => { db.close(); log(`---- programa interrompido com CTRL-C`); });
+    process.on ('uncaughtException', (err) => { log(`Exceção não tratada: ${err}`); process.exit(1); });
 }
 
 const main = () => {
+    registerExitHandlers();
+    
     log('procurando designações para adicionar à base de dados...')
     getUsuariosFromDB().then(listUsuarios => {
         return new Promise((resolve, reject) => {
@@ -404,17 +410,25 @@ const main = () => {
                 }));
             });
         });
-    }).then(() => {
-        log('buscando designações na base de dados, ainda não enviadas por e-mail...');
-        getAllDesignacoesNotSent().then((designacoes) => {
-            log(`foram encontradas ${designacoes.length} designações ainda não enviadas por e-mail`);
-            designacoes.forEach((d) => {
-                let subject = `Designação #${d.id}`;
-                sendEmail(d.email, subject, d.conteudo);
-                markDesignacaoAsSent(d.idUsuario, d.id);
-            }, (err) => log(`getAllDesignacoesNotSent: ${err}`));
+    }).then(() => { 
+        return new Promise((resolve, reject) => {
+            log('buscando designações na base de dados, ainda não enviadas por e-mail...');
+            getAllDesignacoesNotSent().then((designacoes) => {
+                log(`foram encontradas ${designacoes.length} designações ainda não enviadas por e-mail`);
+                if (designacoes.length == 0) {
+                    resolve();
+                }
+                let promisesEmail = designacoes.map((d) => {
+                    let subject = `Designação #${d.id}`;
+                    return sendEmail(d.email, subject, d.conteudo).then(() => {
+                        return markDesignacaoAsSent(d.idUsuario, d.id); 
+                    });
+                });
+                
+                Promise.all(promisesEmail).then(() => resolve());
+            })
         })
-    });
+    }).then(() => { log('fim do processo de busca'); process.exit(0); });
 }
 
 main();
