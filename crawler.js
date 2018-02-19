@@ -88,8 +88,9 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
                     if (response && response.statusCode == 200) {
                         let body = convertISO88591ToUTF8(buffer);
                         resolve(body);
-                    } else {   
-                        reject('getRawResultByFilters: sem dados');
+                    } else {  
+                        let msg = error == null ? `HTTP ${response.statusCode}` : error;
+                        reject(`getRawResultByFilters(page: ${page}): ${msg}`);
                     }
                 });
             } else {
@@ -100,7 +101,8 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
                         let body = convertISO88591ToUTF8(buffer);
                         resolve(body);
                     } else {
-                        reject('getRawResultByFilters: sem dados');
+                        let msg = error == null ? `HTTP ${response.statusCode}` : error;
+                        reject(`getRawResultByFilters(page: ${page}): ${msg}`);
                     }
                 });
             }
