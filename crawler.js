@@ -10,6 +10,9 @@ const browserHeaders = {
     'Accept-Language': 'en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6,fr;q=0.5',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
     'Accept-Encoding': 'gzip, deflate',
+    'Cache-Control': 'max-age=0',
+    'Origin': 'http://controlequadropessoal.educacao.mg.gov.br',
+    'Referer': 'http://controlequadropessoal.educacao.mg.gov.br/divulgacao',
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36'
 }
 
@@ -54,22 +57,27 @@ const convertISO88591ToUTF8 = (buffer) => {
 }
 
 const getCookiesAndTokenFields = (okCallback) => {
-    request.get(url, (error, response, body) => {
-        if (response && response.statusCode == 200) {
-            let $ = cheerio.load(body);
-            tokenKey = $('input[name="data[_Token][key]"]').val();
-            tokenFields = $('input[name="data[_Token][fields]"]').val();
-            
-            okCallback();
-        }
+    return new Promise((resolve, reject) => {
+        request.get(url, (error, response, body)=> {
+            if (response && response.statusCode == 200) {
+                let $ = cheerio.load(body);
+                tokenKey = $('input[name="data[_Token][key]"]').val();
+                tokenFields = $('input[name="data[_Token][fields]"]').val();
+                
+                resolve();
+            } else {
+                let msg = error == null ? `HTTP ${response.statusCode}` : error;
+                reject(`getCookiesAndTokenFields: ${msg}`);
+            }
+        });
     });
 };
 
 const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
     return new Promise((resolve, reject) => {
-        getCookiesAndTokenFields(() => {
+        //getCookiesAndTokenFields(() => {
             const postData = {
-                '_method':'POST',
+                '_method': 'POST',
                 'data[_Token][key]': tokenKey,
                 'data[Filtro][BuscaEscola]': '',
                 'data[Filtro][Vaga][regional_id]': regional,
@@ -90,7 +98,7 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
                         resolve(body);
                     } else {  
                         let msg = error == null ? `HTTP ${response.statusCode}` : error;
-                        reject(`getRawResultByFilters(page: ${page}): ${msg}`);
+                        reject(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${msg}`);
                     }
                 });
             } else {
@@ -99,25 +107,29 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
                 request.get(nextPageUrl, { encoding: null, }, (error, response, buffer) => {
                     if (response && response.statusCode == 200) {
                         let body = convertISO88591ToUTF8(buffer);
+                        log(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${body.length} bytes`);
                         resolve(body);
                     } else {
                         let msg = error == null ? `HTTP ${response.statusCode}` : error;
-                        reject(`getRawResultByFilters(page: ${page}): ${msg}`);
+                        reject(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${msg}`);
                     }
                 });
             }
-        });
+        //});
     });
 };
 
 const getUrlsFromDB = () => {
     return new Promise((resolve, reject) => {
-        db.all('SELECT url FROM designacao', (err, rows) => {
-            if (err) {
-                reject(err);
-            }
-            let urls = rows.map((r) => r.url);
-            resolve(urls);
+        db.serialize(() => {
+            db.all('SELECT url FROM designacao', (err, rows) => {
+                if (err) {
+                    log(`getUrlsFromDB: ${err}`);
+                    reject(err);
+                }
+                let urls = rows.map((r) => r.url);
+                resolve(urls);
+            });
         });
     });
 }
@@ -137,8 +149,8 @@ const getUsuariosFromDB = () => {
 const getFiltrosByUsuarioFromDB = (idUsuario) => {
     return new Promise((resolve, reject) => {
         const sql = 
-`SELECT regional, municipio, cargo, categoria FROM filtro
-WHERE idUsuario = ${idUsuario}`;
+            `SELECT regional, municipio, cargo, categoria FROM filtro
+            WHERE idUsuario = ${idUsuario}`;
         db.all(sql, (err, rows) => {
             if (err) {
                 reject(err);
@@ -150,32 +162,59 @@ WHERE idUsuario = ${idUsuario}`;
 }
 
 const addDesignacaoToDB = (id, url, conteudo) => {
-    const sql = 'INSERT INTO designacao (id, url, conteudo) VALUES (?, ?, ?)';
-    
-    db.run(sql, [id, url, conteudo]);
+    const sql = `SELECT COUNT(*) AS numDesignacoes FROM designacao WHERE id = ${id}`;
+    db.serialize(() => {
+        db.all(sql, (err, rows) => {
+            if (err) {
+                log(`addDesignacaoToDB: ${err}`);
+            }
+            
+            if (rows && rows.length > 0) {
+                if (rows[0].numDesignacoes == 0) {
+                    const sqlInsert = 'INSERT INTO designacao (id, url, conteudo) VALUES (?, ?, ?)';
+                    db.serialize(() => {
+                        db.run(sqlInsert, [id, url, conteudo]);
+                    });
+                }
+            }
+        });
+    });
 }
 
-const addNewEnvioToDB = (idUsuario, idDesignacao) => {
+const addNewEnvioToDB = (idUsuario, idDesignacao, callback) => {
     const sql = 
-`SELECT COUNT(*) AS numEnvios
-FROM envio
-WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
-    db.all(sql, (err, rows) => {
-        if (rows && rows.length > 0) {
-            if (rows[0].numEnvios == 0) {
-                const sqlInsert = 'INSERT INTO envio (idUsuario, idDesignacao) VALUES (?, ?)';
-                db.run(sqlInsert, [ idUsuario, idDesignacao ]);
-            }
-        }
-    })
+        `SELECT COUNT(*) AS numEnvios
+        FROM envio
+        WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
+    return new Promise((resolve, reject) => {
+        db.serialize(() => {
+            db.all(sql, (err, rows) => {
+                if (err) {
+                    log(`addNewEnvioToDB: ${err}`);
+                    resolve();
+                } else {
+                    if (rows && rows.length > 0 && rows[0].numEnvios == 0) {
+                        const sqlInsert = 'INSERT INTO envio (idUsuario, idDesignacao) VALUES (?, ?)';
+                        db.serialize(() => {
+                            db.run(sqlInsert, [ idUsuario, idDesignacao ], resolve);
+                        });
+                    } else {
+                        resolve();
+                    }
+                }
+            });
+        });
+    });
 }
 
 const markDesignacaoAsSent = (idUsuario, idDesignacao) => {
     return new Promise((resolve, reject) => {
         const sql = `UPDATE envio SET enviado = 1 WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
-        db.run(sql, () => {
-            log(`marcando designação ${idDesignacao} como enviada para o usuário com id ${idUsuario}`);
-            resolve();
+        db.serialize(() => {
+            db.run(sql, () => {
+                log(`marcando designação ${idDesignacao} como enviada para o usuário com id ${idUsuario}`);
+                resolve();
+            });
         });
     });
 }
@@ -183,22 +222,23 @@ const markDesignacaoAsSent = (idUsuario, idDesignacao) => {
 const getAllDesignacoesNotSent = () => {
     return new Promise((resolve, reject) => {
         const sql = 
-`SELECT 
-	envio.idUsuario AS idUsuario, 
-	usuario.email as email,
-	designacao.id as id, 
-	designacao.conteudo as conteudo 
-FROM envio INNER JOIN designacao
-ON envio.idDesignacao = designacao.id
-INNER JOIN usuario ON envio.idUsuario = usuario.id
-WHERE envio.enviado = 0`;
-
-        db.all(sql, (err, rows) => {
-            if (err) {
-                reject('getAllDesignacoesNotSent:', err);
-            }
-            
-            resolve(rows);
+            `SELECT 
+            	envio.idUsuario AS idUsuario, 
+            	usuario.email as email,
+            	designacao.id as id, 
+            	designacao.conteudo as conteudo 
+            FROM envio INNER JOIN designacao
+            ON envio.idDesignacao = designacao.id
+            INNER JOIN usuario ON envio.idUsuario = usuario.id
+            WHERE envio.enviado = 0`;
+        db.serialize(() => {
+            db.all(sql, (err, rows) => {
+                if (err) {
+                    reject('getAllDesignacoesNotSent:', err);
+                }
+                
+                resolve(rows);
+            });
         });
     });
 }
@@ -224,6 +264,7 @@ const getDesignacoesByFiltersRec = (regional, municipio, cargo, categoria, page)
                 }
             }
         }, (err) => {
+            log(err);
             resolve([]);
         });
     });
@@ -241,80 +282,80 @@ const downloadHtml = (url) => {
     });
 };
 
+const downloadDesignacao = (url) => {
+    const regexIdEdital = /[0-9]+/;
+    
+    return downloadHtml(url).then((html) => {
+        let $ = cheerio.load(html);
+                        
+        let conteudo = `
+            <!DOCTYPE html>
+            	<html lang="pt-br" dir="ltr">
+            		<head>
+            			<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+            			<style>
+            				body {
+            					font-family: Arial, Helvetica, sans-serif;
+            					font-size: 10px;
+            				}
+            				
+            				.tabela {
+            					border-collapse: collapse;
+            				}
+            				.tabela td, th{
+            					border: 1px solid black;
+            				}
+            				.tabela th {
+            					background-color: gray;
+            				}
+            			</style>	
+            		</head>
+            	<body>
+                    ${$.html('.endereco')}
+                    ${$.html('.tabela')}
+                    <br />
+                    <a href="${url}" target="_blank">Confira mais no site da designação</a>
+                </body>
+            </html>`;
+    
+    
+        return {
+            id: regexIdEdital.exec(url)[0],
+            url: url,
+            html: conteudo
+        };
+    });
+}
+
 const addDesignacoesToDBByFiltersAndUsuario = (idUsuario, regional, municipio, cargo, categoria) => {
     return new Promise((resolve, reject) => {
         urls = [];
         
-        getDesignacoesByFiltersRec(regional, municipio, cargo, categoria, 1).then((newUrlList) => {
-            const regexIdEdital = /[0-9]+/;
-            
-            getUrlsFromDB().then((oldUrls) => {
-                let urlList = newUrlList;
-                
-                let urlPromises = urlList.map((url) => {
-                    return downloadHtml(url).then((html) => {
-                        
-                        let $ = cheerio.load(html);
-                        
-                        let conteudo = 
-`<!DOCTYPE html>
-	<html lang="pt-br" dir="ltr">
-		<head>
-			<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-			<style>
-				body {
-					font-family: Arial, Helvetica, sans-serif;
-					font-size: 10px;
-				}
-				
-				.tabela {
-					border-collapse: collapse;
-				}
-				.tabela td, th{
-					border: 1px solid black;
-				}
-				.tabela th {
-					background-color: gray;
-				}
-			</style>	
-		</head>
-	<body>
-        ${$.html('.endereco')}
-        ${$.html('.tabela')}
-        <br />
-        <a href="${url}" target="_blank">Confira mais no site da designação</a>
-    </body>
-</html>`;
-
-                    
-                        return {
-                            id: regexIdEdital.exec(url)[0],
-                            url: url,
-                            html: conteudo
-                        };
-                    });
-                });
+        getDesignacoesByFiltersRec(regional, municipio, cargo, categoria, 1).then((urlList) => {
+            return new Promise((resolve, reject) => {
+                let urlPromises = urlList.map((url) => downloadDesignacao(url));
                 
                 Promise.all(urlPromises).then((items) => {
-                    items.forEach((i) => {
-                        // Excluir urls já baixadas
-                        if (oldUrls.indexOf(i.url) < 0) {
-                            log(`nova designação encontrada, id: ${i.id}, url: ${i.url}`);
-                            addDesignacaoToDB(i.id, i.url, i.html);
-                        }
-                        addNewEnvioToDB(idUsuario, i.id);
+                    let processNovasDesignacoes = items.map((i) => {
+                        return getUrlsFromDB().then((oldUrls) => {
+                            return new Promise((resolve, reject) => {
+                                // Excluir urls já baixadas
+                                if (oldUrls.indexOf(i.url) < 0) {
+                                    log(`nova designação encontrada, id: ${i.id}, url: ${i.url}`);
+                                    addDesignacaoToDB(i.id, i.url, i.html);
+                                }
+                                resolve(addNewEnvioToDB(idUsuario, i.id));
+                            });
+                        });
                     });
-                    
-                    resolve();
+                    Promise.all(processNovasDesignacoes).then(resolve());
                 });
-            }, err => {
-                log(`addDesignacoesToDBByFiltersAndUsuario: ${err}`)
-                resolve();
             });
         }, err => {
-            log(`addDesignacoesToDBByFiltersAndUsuario: ${err}`)
+            log(`addDesignacoesToDBByFiltersAndUsuario: ${err}`);
             resolve();
-        });
+        })
+        .then(resolve());
     });
 };
 
@@ -360,52 +401,66 @@ const sendEmail = (to, subject, html) => {
 
 const registerExitHandlers = () => {
     process.on('exit', (code) => { db.close(); log(`---- finalizando com código ${code}`); });
-    process.on ('SIGINT', () => { db.close(); log(`---- programa interrompido com CTRL-C`); process.exit(0); });
-    process.on ('uncaughtException', (err) => { log(`Exceção não tratada: ${err}`); process.exit(1); });
 }
 
 const main = () => {
     registerExitHandlers();
-    
-    log('procurando designações para adicionar à base de dados...')
-    getUsuariosFromDB().then(listUsuarios => {
+    log('obtendo chaves do site da designação...');
+    getCookiesAndTokenFields().then(() => {
+        log('procurando designações para adicionar à base de dados...')
+    }).then(() => {
+        return getUsuariosFromDB();
+    }).then(listUsuarios => {
+        // Forçar pausa duante o processamento de todos os usuários
         return new Promise((resolve, reject) => {
             if (listUsuarios.length == 0) {
                 resolve();
             }
             
-            listUsuarios.forEach((usuario) => {
+            let processUsuarios = listUsuarios.map((usuario) => {
                 log(`Usuário atual: ${usuario.email}`);
-                getFiltrosByUsuarioFromDB(usuario.id).then((filtros => {
-                    let promisesBusca = filtros.map((f) => {
-                        log(`procurando designações para o usuário ${usuario.email} com filtro de regional '${f.regional}', município '${f.municipio}', cargo '${f.cargo}', categoria '${f.categoria}'`)
-                        return addDesignacoesToDBByFiltersAndUsuario(
-                                usuario.id, f.regional, f.municipio, 
-                                f.cargo, f.categoria);
-                    });
-                    Promise.all(promisesBusca).then(() => resolve());
-                }));
-            });
-        });
-    }).then(() => { 
-        return new Promise((resolve, reject) => {
-            log('buscando designações na base de dados, ainda não enviadas por e-mail...');
-            getAllDesignacoesNotSent().then((designacoes) => {
-                log(`foram encontradas ${designacoes.length} designações ainda não enviadas por e-mail`);
-                if (designacoes.length == 0) {
-                    resolve();
-                }
-                let promisesEmail = designacoes.map((d) => {
-                    let subject = `Designação #${d.id}`;
-                    return sendEmail(d.email, subject, d.conteudo).then(() => {
-                        return markDesignacaoAsSent(d.idUsuario, d.id); 
+                
+                // Forçar pausa durante o processamento de cada usuário
+                return new Promise((resolve, reject) => {
+                    getFiltrosByUsuarioFromDB(usuario.id).then((filtros) => {
+                        let processFiltros = filtros.map((f) => {
+                            log(`procurando designações para o usuário ${usuario.email} com filtro de regional '${f.regional}', município '${f.municipio}', cargo '${f.cargo}', categoria '${f.categoria}'`);
+                            
+                            // Forçar pausa durante o processamento de cada filtro
+                            return new Promise((resolve, reject) => {
+                                addDesignacoesToDBByFiltersAndUsuario(usuario.id, f.regional, f.municipio, f.cargo, f.categoria).then(resolve());
+                            });
+                        });
+                        
+                        // Pausar até processar todos os filtros
+                        Promise.all(processFiltros).then(resolve());
                     });
                 });
-                
-                Promise.all(promisesEmail).then(() => resolve());
-            })
-        })
-    }).then(() => { log('fim do processo de busca'); process.exit(0); });
+            });
+            
+            // Pausar até processar todos os usuários
+            Promise.all(processUsuarios).then(resolve());
+        });
+    }).then(() => {
+        log('buscando designações na base de dados, ainda não enviadas por e-mail...');
+    }).then(() => {
+        return getAllDesignacoesNotSent();
+    }).then(designacoes => {
+        // Forçar pausa durante o envio das designações
+        return new Promise((resolve, reject) => {
+            log(`foram encontradas ${designacoes.length} designações ainda não enviadas por e-mail`);
+            if (designacoes.length == 0) {
+                resolve();
+            }
+            
+            let processEmails = designacoes.map((d) => {
+                let subject = `Designação #${d.id}`;
+                sendEmail(d.email, subject, d.conteudo).then(markDesignacaoAsSent(d.idUsuario, d.id));
+            });
+            
+            Promise.all(processEmails).then(resolve());
+        });
+    }).then(() => { log('fim do processo de busca')});
 }
 
 main();
