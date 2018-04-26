@@ -162,7 +162,7 @@ const getFiltrosByUsuarioFromDB = (idUsuario) => {
 }
 
 const addDesignacaoToDB = (id, url, conteudo) => {
-    const sql = `SELECT COUNT(*) AS numDesignacoes FROM designacao WHERE id = ${id}`;
+    const sql = `SELECT COUNT(*) AS numDesignacoes FROM designacao WHERE id = '${id}'`;
     db.serialize(() => {
         db.all(sql, (err, rows) => {
             if (err) {
@@ -185,7 +185,7 @@ const addNewEnvioToDB = (idUsuario, idDesignacao, callback) => {
     const sql = 
         `SELECT COUNT(*) AS numEnvios
         FROM envio
-        WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
+        WHERE idUsuario = ${idUsuario} AND idDesignacao = '${idDesignacao}'`;
     return new Promise((resolve, reject) => {
         db.serialize(() => {
             db.all(sql, (err, rows) => {
@@ -209,7 +209,7 @@ const addNewEnvioToDB = (idUsuario, idDesignacao, callback) => {
 
 const markDesignacaoAsSent = (idUsuario, idDesignacao) => {
     return new Promise((resolve, reject) => {
-        const sql = `UPDATE envio SET enviado = 1 WHERE idUsuario = ${idUsuario} AND idDesignacao = ${idDesignacao}`;
+        const sql = `UPDATE envio SET enviado = 1 WHERE idUsuario = ${idUsuario} AND idDesignacao = '${idDesignacao}'`;
         db.serialize(() => {
             db.run(sql, () => {
                 log(`marcando designação ${idDesignacao} como enviada para o usuário com id ${idUsuario}`);
@@ -283,7 +283,8 @@ const downloadHtml = (url) => {
 };
 
 const downloadDesignacao = (url) => {
-    const regexIdEdital = /[0-9]+/;
+    //const regexIdEdital = /[0-9]+/;
+    const regexIdEdital = /[0-9a-zA-Z]+%3D/
     
     return downloadHtml(url).then((html) => {
         let $ = cheerio.load(html);
@@ -320,7 +321,7 @@ const downloadDesignacao = (url) => {
     
     
         return {
-            id: regexIdEdital.exec(url)[0],
+            id: regexIdEdital.exec(url)[0].replace(/%3D/, ''),
             url: url,
             html: conteudo
         };

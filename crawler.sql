@@ -14,13 +14,13 @@ CREATE TABLE `filtro` (
 );
 CREATE TABLE "envio" (
 	`idUsuario`	INTEGER NOT NULL,
-	`idDesignacao`	INTEGER NOT NULL,
+	`idDesignacao`	TEXT NOT NULL,
 	`enviado`	INTEGER NOT NULL DEFAULT 0,
 	FOREIGN KEY(`idUsuario`) REFERENCES usuario ( id ),
 	FOREIGN KEY(`idDesignacao`) REFERENCES designacao ( id )
 );
 CREATE TABLE `designacao` (
-	`id`	INTEGER NOT NULL,
+	`id`	TEXT NOT NULL,
 	`url`	TEXT NOT NULL,
 	`conteudo`	TEXT NOT NULL,
 	PRIMARY KEY(id)
