@@ -47,11 +47,6 @@ const log = (message) => {
     console.log(`${dateTime}: ${message}`);
 }
 
-const convertISO88591ToUTF8 = (buffer) => {
-    let iconv = new Iconv('ISO-8859-1', 'UTF-8');
-    return iconv.convert(buffer).toString('utf8');
-}
-
 const getCookiesAndTokenFields = (okCallback) => {
     return new Promise((resolve, reject) => {
         request.get(url, (error, response) => {
@@ -60,7 +55,7 @@ const getCookiesAndTokenFields = (okCallback) => {
                 tokenKey = $('input[name="data[_Token][key]"]').val();
                 tokenFields = $('input[name="data[_Token][fields]"]').val();
                 
-		cookies = response.cookies;
+                cookies = response.cookies;
                 resolve();
             } else {
                 let msg = error == null ? `HTTP ${response.statusCode}` : error;
@@ -90,7 +85,7 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
             if (page == 1) {
                 request.post(url, postData, { headers: browserHeaders, cookies: cookies }, (error, response) => {
                     if (response && response.statusCode == 200) {
-			cookies = response.cookies;
+			            cookies = response.cookies;
                         resolve(response.body);
                     } else {  
                         let msg = error == null ? `HTTP ${response.statusCode}` : error;
@@ -102,7 +97,7 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
             
                 request.get(nextPageUrl, { headers: browserHeaders, cookies: cookies }, (error, response) => {
                     if (response && response.statusCode == 200) {
-			cookies = response.cookies;
+			            cookies = response.cookies;
                         log(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${body.length} bytes`);
                         resolve(response.body);
                     } else {
