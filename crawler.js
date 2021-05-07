@@ -1,32 +1,28 @@
 #!/usr/bin/env nodejs
 'use strict';
 
-const url = 'http://controlequadropessoal.educacao.mg.gov.br/divulgacao';
+const url = 'https://controlequadropessoal.educacao.mg.gov.br/divulgacao';
 const baseDados = 'crawler.db3';
 let tokenKey = '';
 let tokenFields = '';
 
 const browserHeaders = {
-    'Accept-Language': 'en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7,es;q=0.6,fr;q=0.5',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,es-CO;q=0.8,es;q=0.7,en-US;q=0.6,en;q=0.5',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*.*;q=0.8,application/signed-exchange;v=b3;q=0.9',
     'Accept-Encoding': 'gzip, deflate',
     'Cache-Control': 'max-age=0',
-    'Origin': 'http://controlequadropessoal.educacao.mg.gov.br',
-    'Referer': 'http://controlequadropessoal.educacao.mg.gov.br/divulgacao',
-    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/64.0.3282.140 Safari/537.36'
+    'Host': 'controlequadropessoal.educacao.mg.gov.br',
+    'Origin': 'https://controlequadropessoal.educacao.mg.gov.br',
+    'Referer': 'https://controlequadropessoal.educacao.mg.gov.br/divulgacao',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
 }
 
-let request = require('request');
-let cookies = request.jar();
-
-request = request.defaults({
-    encoding: 'latin1', 
-    followAllRedirects: false,
-    gzip: true,
+let cookies = {};
+let needleOptions = {
     headers: browserHeaders,
-    jar: cookies
-});
+};
 
+const request = require('needle');
 const cheerio = require('cheerio');
 const Iconv = require('iconv').Iconv;
 const nodemailer = require('nodemailer');
@@ -58,12 +54,13 @@ const convertISO88591ToUTF8 = (buffer) => {
 
 const getCookiesAndTokenFields = (okCallback) => {
     return new Promise((resolve, reject) => {
-        request.get(url, (error, response, body)=> {
+        request.get(url, (error, response) => {
             if (response && response.statusCode == 200) {
-                let $ = cheerio.load(body);
+                let $ = cheerio.load(response.body);
                 tokenKey = $('input[name="data[_Token][key]"]').val();
                 tokenFields = $('input[name="data[_Token][fields]"]').val();
                 
+		cookies = response.cookies;
                 resolve();
             } else {
                 let msg = error == null ? `HTTP ${response.statusCode}` : error;
@@ -75,27 +72,26 @@ const getCookiesAndTokenFields = (okCallback) => {
 
 const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
     return new Promise((resolve, reject) => {
-        //getCookiesAndTokenFields(() => {
-            const postData = {
-                '_method': 'POST',
-                'data[_Token][key]': tokenKey,
-                'data[Filtro][BuscaEscola]': '',
-                'data[Filtro][Vaga][regional_id]': regional,
-                'data[Filtro][Escola][municipio_id]': municipio,
-                'data[Filtro][Vaga][escola_id]': '',
-                'data[Filtro][Vaga][carreira_id]': cargo,
-                'data[Filtro][Vaga][funcao_id]': categoria,
-                'Filtrar': '',
-                'data[_Token][fields]': tokenFields,
-                'data[_Token][unlocked]': 'Filtrar'
-            };
+            const postData = [
+                `_method=POST`,
+                `data[_Token][key]=${tokenKey}`,
+                `data[Filtro][BuscaEscola]=`,
+                `data[Filtro][Vaga][regional_id]=${regional}`,
+                `data[Filtro][Escola][municipio_id]=${municipio}`,
+                `data[Filtro][Vaga][escola_id]=`,
+                `data[Filtro][Vaga][carreira_id]=${cargo}`,
+                `data[Filtro][Vaga][funcao_id]=${categoria}`,
+                `Filtrar=`,
+                `data[_Token][fields]=${tokenFields}`,
+                `data[_Token][unlocked]=Filtrar`
+	    ].join('&');
         
         
             if (page == 1) {
-                request.post(url, { form: postData, encoding: null, }, (error, response, buffer) => {
+                request.post(url, postData, { headers: browserHeaders, cookies: cookies }, (error, response) => {
                     if (response && response.statusCode == 200) {
-                        let body = convertISO88591ToUTF8(buffer);
-                        resolve(body);
+			cookies = response.cookies;
+                        resolve(response.body);
                     } else {  
                         let msg = error == null ? `HTTP ${response.statusCode}` : error;
                         reject(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${msg}`);
@@ -104,18 +100,17 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
             } else {
                 let nextPageUrl = `${url}/page:${page}`;
             
-                request.get(nextPageUrl, { encoding: null, }, (error, response, buffer) => {
+                request.get(nextPageUrl, { headers: browserHeaders, cookies: cookies }, (error, response) => {
                     if (response && response.statusCode == 200) {
-                        let body = convertISO88591ToUTF8(buffer);
+			cookies = response.cookies;
                         log(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${body.length} bytes`);
-                        resolve(body);
+                        resolve(response.body);
                     } else {
                         let msg = error == null ? `HTTP ${response.statusCode}` : error;
                         reject(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${msg}`);
                     }
                 });
             }
-        //});
     });
 };
 
@@ -249,7 +244,7 @@ const getDesignacoesByFiltersRec = (regional, municipio, cargo, categoria, page)
     return new Promise((resolve, reject) => {
 
         getRawResultByFilters(regional, municipio, cargo, categoria, page).then((body) => {
-            if (body != null) {
+	    if (body != null) {
                 let $ = cheerio.load(body)
                 var moreResults = $('.next').length > 0;
                 
@@ -272,9 +267,9 @@ const getDesignacoesByFiltersRec = (regional, municipio, cargo, categoria, page)
 
 const downloadHtml = (url) => {
     return new Promise((resolve, reject) => {
-        request.get(url, { encoding: null }, (error, response, buffer) => {
+        request.get(url, { headers: browserHeaders, cookies: cookies }, (error, response) => {
             if (response && response.statusCode == 200) {
-                resolve(convertISO88591ToUTF8(buffer));
+                resolve(response.body);
             } else {
                 resolve(null); 
             }
@@ -402,6 +397,7 @@ const sendEmail = (to, subject, html) => {
 
 const registerExitHandlers = () => {
     process.on('exit', (code) => { db.close(); log(`---- finalizando com código ${code}`); });
+    process.on('uncaughtException', (err, origin) => { db.close(); log(`---- exceção sem tratamento: ${err}\n---- origem: ${origin}`); });
 }
 
 const main = () => {

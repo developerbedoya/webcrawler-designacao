@@ -27,8 +27,8 @@
   "dependencies": {
     "cheerio": "^1.0.0-rc.9",
     "iconv": "^3.0.0",
+    "needle": "^2.6.0",
     "nodemailer": "^6.6.0",
-    "request": "^2.83.0",
     "sqlite3": "^5.0.2"
   }
 }
