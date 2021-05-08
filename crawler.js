@@ -6,51 +6,32 @@ const baseDados = 'crawler.db3';
 let tokenKey = '';
 let tokenFields = '';
 
-// const browserHeaders = {
-//     'Accept-Language': 'pt-BR,pt;q=0.9,es-CO;q=0.8,es;q=0.7,en-US;q=0.6,en;q=0.5',
-//     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*.*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-//     'Accept-Encoding': 'gzip, deflate',
-//     'Cache-Control': 'max-age=0',
-//     'Host': 'controlequadropessoal.educacao.mg.gov.br',
-//     'Origin': 'https://controlequadropessoal.educacao.mg.gov.br',
-//     'Referer': 'https://controlequadropessoal.educacao.mg.gov.br/divulgacao',
-//     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36'
-// }
-
 const browserHeaders = {
-    'Host': ' controlequadropessoal.educacao.mg.gov.br',
+    'Host': 'controlequadropessoal.educacao.mg.gov.br',
     'Connection': 'keep-alive',
-    'Cache-Control': ' max-age=0',
-    'sec-ch-ua': ' " Not A;Brand";v="99", "Chromium";v="90", "Google Chrome";v="90"',
-    'sec-ch-ua-mobile': ' ?0',
-    'Upgrade-Insecure-Requests': ' 1',
-    'Origin': ' https://controlequadropessoal.educacao.mg.gov.br',
-    'User-Agent': ' Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36',
+    'Cache-Control': 'max-age=0',
+    'sec-ch-ua': '" Not A;Brand";v="99", "Chromium";v="90", "Google Chrome";v="90"',
+    'sec-ch-ua-mobile': '?0',
+    'Upgrade-Insecure-Requests': '1',
+    'Origin': 'https://controlequadropessoal.educacao.mg.gov.br',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-    'Sec-Fetch-Site': ' same-origin',
-    'Sec-Fetch-Mode': ' navigate',
-    'Sec-Fetch-User': ' ?1',
-    'Sec-Fetch-Dest': ' document',
-    'Referer': ' https://controlequadropessoal.educacao.mg.gov.br/divulgacao',
-    'Accept-Encoding': ' gzip, deflate, br',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-User': '?1',
+    'Sec-Fetch-Dest': 'document',
+    'Referer': 'https://controlequadropessoal.educacao.mg.gov.br/divulgacao',
+    'Accept-Encoding': 'gzip, deflate, br',
     'Accept-Language': 'pt-BR,pt;q=0.9,es-CO;q=0.8,es;q=0.7,en-US;q=0.6,en;q=0.5'
 };
 
-const proxy = 'http://127.0.0.1:8866';
-let cookies = {
-    // '_ga': 'GA1.4.1787841843.1617059756',
-    // '_gid': 'GA1.4.901831998.1620387785'
-};
-let needleOptions = {
-    headers: browserHeaders,
-};
+let cookies = {};
 
 const request = require('needle');
 const cheerio = require('cheerio');
 const Iconv = require('iconv').Iconv;
 const nodemailer = require('nodemailer');
 const sqlite3 = require('sqlite3');
-
 const db = new sqlite3.Database(baseDados);
 
 const log = (message) => {
@@ -72,8 +53,9 @@ const log = (message) => {
 
 const getCookiesAndTokenFields = (okCallback) => {
     return new Promise((resolve, reject) => {
-        request.get(url, { headers: browserHeaders, proxy: proxy }, (error, response) => {
-            if (response && response.statusCode == 200) {
+        request.get(url, { headers: browserHeaders }, (error, response) => {
+            console.log(JSON.stringify(error));
+			if (response && response.statusCode == 200) {
                 let $ = cheerio.load(response.body);
                 tokenKey = $('input[name="data[_Token][key]"]').val();
                 tokenFields = $('input[name="data[_Token][fields]"]').val();
@@ -109,8 +91,8 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
 	    ].join('&').replaceAll('[', '%5B').replaceAll(']', '%5D');
         
         if (page == 1) {
-            request.post(url, postData, { headers: browserHeaders, cookies: cookies, proxy: proxy }, (error, response) => {
-                if (response && response.statusCode == 200) {
+            request.post(url, postData, { headers: browserHeaders, cookies: cookies }, (error, response) => {
+				if (response && response.statusCode == 200) {
                     cookies = response.cookies;
                     resolve(response.body);
                 } else {  
@@ -121,7 +103,7 @@ const getRawResultByFilters = (regional, municipio, cargo, categoria, page) => {
         } else {
             let nextPageUrl = `${url}/page:${page}`;
         
-            request.get(nextPageUrl, { headers: browserHeaders, cookies: cookies, proxy: proxy }, (error, response) => {
+            request.get(nextPageUrl, { headers: browserHeaders, cookies: cookies }, (error, response) => {
                 if (response && response.statusCode == 200) {
                     cookies = response.cookies;
                     log(`getRawResultByFilters(regional: ${regional}, municipio: ${municipio}, cargo: ${cargo}, categoria: ${categoria}, page: ${page}): ${body.length} bytes`);
@@ -288,7 +270,7 @@ const getDesignacoesByFiltersRec = (regional, municipio, cargo, categoria, page)
 
 const downloadHtml = (url) => {
     return new Promise((resolve, reject) => {
-        request.get(url, { headers: browserHeaders, cookies: cookies, proxy: proxy }, (error, response) => {
+        request.get(url, { headers: browserHeaders, cookies: cookies }, (error, response) => {
             if (response && response.statusCode == 200) {
                 cookies = response.cookies;
                 resolve(response.body);
